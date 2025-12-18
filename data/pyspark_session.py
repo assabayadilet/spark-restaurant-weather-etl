@@ -1,5 +1,5 @@
 from pyspark.sql import SparkSession
-
+#Adilet
 # Create a SparkSession
 spark = SparkSession.builder \
     .appName("MySparkApplication") \
