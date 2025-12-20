@@ -7,7 +7,7 @@ services:
     volumes:
        - ./:/app
        - ./data:/data
-       - /Users/adiletassabay/Downloads/Spark:/data
+       - ./data:/opt/spark-data
     environment:
       - SPARK_LOCAL_IP=spark-master
       - SPARK_WORKLOAD=master
@@ -29,5 +29,5 @@ services:
     volumes:
        - ./:/app
        - ./data:/data
-       - /Users/adiletassabay/Downloads/Spark:/data
+       - ./data:/opt/spark-data
 
