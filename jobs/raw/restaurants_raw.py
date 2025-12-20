@@ -29,7 +29,6 @@ def main():
     print(f"Total rows: {df.count()}")
 
     df.write.mode("overwrite").parquet(output_path)
-    print(f"Data written to {output_path} in Parquet format.")
 
     spark.stop()
 

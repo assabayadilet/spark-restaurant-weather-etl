@@ -8,6 +8,7 @@ services:
        - ./:/app
        - ./data:/data
        - ./data:/opt/spark-data
+       - /Users/adiletassabay/Downloads/Spark:/opt/input-data:ro
     environment:
       - SPARK_LOCAL_IP=spark-master
       - SPARK_WORKLOAD=master

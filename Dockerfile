@@ -65,5 +65,7 @@ RUN mkdir -p $SPARK_LOG_DIR && \
 
 COPY start-spark.sh /
 COPY jobs /opt/spark-jobs
+COPY requirements.txt /tmp/requirements.txt
+RUN pip3 install --no-cache-dir -r /tmp/requirements.txt
 
 CMD ["/bin/bash", "/start-spark.sh"]
