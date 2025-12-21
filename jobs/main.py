@@ -261,6 +261,11 @@ def main() -> None:
     # ---- TASK 4: Write enriched data as partitioned Parquet
     write_enriched_data(enriched_df)
 
+    #---- Read enriched data back for inspection
+    enriched_readback_df = spark.read.parquet(f"{BASE_PATH}/output/enriched_parquet")
+    inspect_df(enriched_readback_df, "Enriched Restaurants with Weather")
+
+
     spark.stop()
 
 
