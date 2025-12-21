@@ -173,6 +173,64 @@ def add_geohash_columns(
 
     return restaurants_geo_df, weather_geo_df
 
+def join_restaurants_with_weather(
+    restaurants_geo_df: DataFrame,
+    weather_geo_df: DataFrame,
+) -> DataFrame:
+    """\
+    TASK 3:
+    - Left-join restaurants with weather on 4-character geohash
+    - Avoid data multiplication by deduplicating weather by (geohash, year, month, day)
+    - Return enriched dataframe with all restaurant fields + weather fields
+    """
+
+    # Deduplicate weather per geohash & date to reduce data multiplication risk
+    weather_dedup = weather_geo_df.dropDuplicates(["geohash", "year", "month", "day"])
+    weather_dedup = weather_dedup.drop("lat", "lng")
+
+    enriched_df = restaurants_geo_df.join(
+        weather_dedup,
+        on="geohash",
+        how="left",
+    )
+
+    print("\n================ TASK 3 RESULTS (Join) ================")
+    enriched_df.select(
+        "id",
+        "city",
+        "country",
+        "lat",
+        "lng",
+        "geohash",
+        "year",
+        "month",
+        "day",
+        "avg_tmpr_c",
+        "avg_tmpr_f",
+    ).show(5, truncate=False)
+
+    return enriched_df
+
+def write_enriched_data(enriched_df: DataFrame) -> None:
+    """\
+    TASK 4:
+    - Write enriched data to local filesystem in Parquet format
+    - Preserve partitioning by year, month, day (from weather data)
+    - Use overwrite mode to keep the job idempotent
+    """
+
+    output_path = f"{BASE_PATH}/output/enriched_parquet"
+
+    (
+        enriched_df
+        .write
+        .mode("overwrite")
+        .partitionBy("year", "month", "day")
+        .parquet(output_path)
+    )
+
+    print("\n================ TASK 4 RESULTS (Write) ================")
+    print(f"Enriched data written to: {output_path}")
 
 # ======================================================
 # 4) MAIN — PIPELINE ENTRY POINT
@@ -194,10 +252,14 @@ def main() -> None:
     # ---- TASK 2: Generate geohash columns
     restaurants_geo_df, weather_geo_df = add_geohash_columns(
         valid_restaurants_df,
-        weather_df
+        weather_df,
     )
 
-   
+    # ---- TASK 3: Join restaurants with weather
+    enriched_df = join_restaurants_with_weather(restaurants_geo_df, weather_geo_df)
+
+    # ---- TASK 4: Write enriched data as partitioned Parquet
+    write_enriched_data(enriched_df)
 
     spark.stop()
 
