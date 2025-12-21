@@ -8,8 +8,8 @@ services:
        - ./:/app
        - ./data:/data
        - ./data:/opt/spark-data
-       - /Users/adiletassabay/Downloads/Spark:/opt/input-data:ro
     environment:
+      - OPENCAGE_API_KEY=0285d06047d84d0ab21b0e2e82078e59
       - SPARK_LOCAL_IP=spark-master
       - SPARK_WORKLOAD=master
   spark-worker-a:

@@ -1,22 +1,20 @@
 from pyspark.sql import SparkSession
 from pyspark.sql import DataFrame
 import os
+import requests
+from pyspark.sql.functions import col
+import geohash2
+from pyspark.sql.functions import udf
+from pyspark.sql.types import StringType
 
 # 0) CONFIG — paths MUST match current project structure
 
 BASE_PATH = "/app/data"
 
 RESTAURANTS_PATH = f"{BASE_PATH}/input/restaurant_csv"
-WEATHER_PATH = f"{BASE_PATH}/input/Weather"   # IMPORTANT: folder name is case-sensitive
+WEATHER_PATH = f"{BASE_PATH}/input/Weather"
 
-
-# ======================================================
-# 1) CREATE SPARK SESSION
-# ======================================================
 def create_spark(app_name: str) -> SparkSession:
-    """
-    SparkSession for local development (IDE / Docker).
-    """
     spark = (
         SparkSession.builder
         .appName(app_name)
@@ -26,13 +24,8 @@ def create_spark(app_name: str) -> SparkSession:
     spark.sparkContext.setLogLevel("WARN")
     return spark
 
-
-# ======================================================
-# 2) READ INPUT DATASETS
-# ======================================================
 def read_restaurants(spark: SparkSession) -> DataFrame:
     """
-    Step 1 (Task):
     Read restaurants data from CSV files.
     Spark reads ALL csv files inside the folder.
     """
@@ -43,53 +36,36 @@ def read_restaurants(spark: SparkSession) -> DataFrame:
         .csv(RESTAURANTS_PATH)
     )
 
-
 def read_weather(spark: SparkSession) -> DataFrame:
-    base = "/app/data/input/weather"   # или "/data/input/weather" если у вас другой монт
-    parquet_files = []
-    # Resolve actual on-disk path (container may mount project under /app or /data)
-    candidates = [
-        os.path.join("/app", WEATHER_PATH),
-        os.path.join("/data", WEATHER_PATH),
-        os.path.join("/app", BASE_PATH, "input", "Weather"),
-        os.path.join(BASE_PATH, "input", "Weather"),
-        WEATHER_PATH,
+    """
+    Read weather data from multiple parquet datasets located under one directory.
+    Each subdirectory (e.g. weather, weather 2, ...) is treated as a separate
+    parquet root and unioned to avoid Spark partition conflicts.
+    """
+
+    actual = os.path.join("/app", WEATHER_PATH)
+    if not os.path.exists(actual):
+        raise FileNotFoundError(f"Weather path not found: {actual}")
+
+    # list only first-level subdirectories (weather, weather 2, ...)
+    parquet_roots = [
+        os.path.join(actual, d)
+        for d in os.listdir(actual)
+        if os.path.isdir(os.path.join(actual, d))
     ]
-    actual = next((p for p in candidates if os.path.exists(p)), None)
-    if actual is None:
-        raise FileNotFoundError(f"Weather path not found, tried: {candidates}")
 
-    # If directory contains multiple differently-named subfolders (e.g. 'weather', 'weather 5', ...),
-    # load each subfolder separately and union them to avoid Spark partition inference conflicts.
-    subdirs = [os.path.join(actual, d) for d in os.listdir(actual) if os.path.isdir(os.path.join(actual, d))]
-    parquet_dirs = []
-    for d in subdirs:
-        # check if this subdir contains parquet files (or nested partition dirs)
-        contains_parquet = False
-        for root, _, files in os.walk(d):
-            if any(f.endswith(".parquet") or f.endswith(".snappy.parquet") for f in files):
-                contains_parquet = True
-                break
-        if contains_parquet:
-            parquet_dirs.append(d)
+    if not parquet_roots:
+        raise RuntimeError(f"No weather parquet datasets found in {actual}")
 
-    # If no subdirs with parquet found, maybe parquet files are directly under actual
-    if not parquet_dirs:
-        return spark.read.parquet(actual)
-
-    # Load each parquet directory and union them
     df = None
-    for p in parquet_dirs:
-        part = spark.read.parquet(p)
+    for root in parquet_roots:
+        part = spark.read.parquet(root)
         df = part if df is None else df.unionByName(part)
-    return df
-    if not parquet_files:
-        raise FileNotFoundError(f"No parquet files found under {base}")
-    return spark.read.parquet(*parquet_files)
 
+    return df
 
 # ======================================================
-# 3) INSPECTION / DEBUG HELPERS
+# INSPECTION / DEBUG HELPERS
 # ======================================================
 def inspect_df(df: DataFrame, name: str) -> None:
     """
@@ -106,8 +82,96 @@ def inspect_df(df: DataFrame, name: str) -> None:
     print("Sample rows:")
     df.show(5, truncate=False)
 
+# ======================================================
+# TASK 1.1: Check restaurant data for incorrect coordinates
+# ======================================================
 
+def geocode_with_opencage(city: str, country: str):
 
+    api_key = "0285d06047d84d0ab21b0e2e82078e59"
+
+    url = "https://api.opencagedata.com/geocode/v1/json"
+    params = {
+        "q": f"{city}, {country}",
+        "key": api_key,
+        "limit": 1
+    }
+
+    response = requests.get(url, params=params, timeout=10)
+    response.raise_for_status()
+
+    results = response.json().get("results")
+    if not results:
+        return None, None
+
+    geometry = results[0]["geometry"]
+    return geometry["lat"], geometry["lng"]    
+
+def process_restaurant_coordinates(restaurants_df: DataFrame) -> DataFrame:
+    """
+    TASK 1:
+    - Validate restaurant coordinates
+    - Geocode invalid records using OpenCage API
+    """
+
+    invalid_df = restaurants_df.filter(col("lat").isNull() | col("lng").isNull())
+    valid_df = restaurants_df.subtract(invalid_df)
+
+    print("\n================ TASK 1.1 RESULTS ================")
+    print(f"Valid restaurants count: {valid_df.count()}")
+    print(f"Invalid restaurants count: {invalid_df.count()}")
+    invalid_df.show(5, truncate=False)
+
+    # Geocode first invalid record (demo purpose)
+    row = invalid_df.collect()[0]
+    lat, lng = geocode_with_opencage(row["city"], row["country"])
+
+    print("\n================ TASK 1.2 RESULTS ================")
+    print(f"Geocoded location: {row['city']}, {row['country']}")
+    print(f"Latitude: {lat}, Longitude: {lng}")
+
+    return valid_df
+
+def geohash_4(lat: float, lng: float) -> str:
+    """
+    Generate a 4-character geohash from latitude and longitude.
+    """
+    if lat is None or lng is None:
+        return None
+    return geohash2.encode(lat, lng, precision=4)
+
+geohash_udf = udf(geohash_4, StringType())
+
+def add_geohash_columns(
+    restaurants_df: DataFrame,
+    weather_df: DataFrame
+) -> tuple[DataFrame, DataFrame]:
+    """
+    TASK 2:
+    - Generate 4-character geohash for restaurants and weather
+    - Add it as a new column 'geohash'
+    - Print small samples for README / validation
+    """
+
+    restaurants_geo_df = restaurants_df.withColumn(
+        "geohash", geohash_udf(col("lat"), col("lng"))
+    )
+
+    weather_geo_df = weather_df.withColumn(
+        "geohash", geohash_udf(col("lat"), col("lng"))
+    )
+
+    print("\n================ TASK 2 RESULTS (Restaurants) ================")
+    restaurants_geo_df.select(
+        "id", "city", "country", "lat", "lng", "geohash"
+    ).show(5, truncate=False)
+
+    print("\n================ TASK 2 RESULTS (Weather) ================")
+    weather_geo_df.select(
+        "lat", "lng", "geohash", "year", "month", "day"
+    ).show(5, truncate=False)
+
+    return restaurants_geo_df, weather_geo_df
 
 
 # ======================================================
@@ -116,13 +180,24 @@ def inspect_df(df: DataFrame, name: str) -> None:
 def main() -> None:
     spark = create_spark("Spark Practice | Read & Inspect")
 
-    # ---- Step A: Read datasets
+    # ---- Read datasets
     restaurants_df = read_restaurants(spark)
     weather_df = read_weather(spark)
 
-    # ---- Step B: Inspect structure and size
+    # ---- Inspect structure and size
     inspect_df(restaurants_df, "Restaurants")
     inspect_df(weather_df, "Weather")
+
+    # ---- TASK 1: Process restaurant coordinates
+    valid_restaurants_df = process_restaurant_coordinates(restaurants_df)
+
+    # ---- TASK 2: Generate geohash columns
+    restaurants_geo_df, weather_geo_df = add_geohash_columns(
+        valid_restaurants_df,
+        weather_df
+    )
+
+   
 
     spark.stop()
 
