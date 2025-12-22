@@ -250,7 +250,8 @@ Idempotency:
 
 **Requirement**
 
-> Store the enriched data (i.e., the joined data with all the fields from both datasets) in the local file system, preserving data partitioning in the parquet format.
+Store the enriched (joined) restaurant–weather data in the local file system in Parquet format.  
+For easier exploration and querying, partition the output by restaurant location.
 
 **Implementation**
 
@@ -260,19 +261,19 @@ Output path inside container:
 OUTPUT_PATH = f"{BASE_PATH}/output/enriched_parquet"
 ```
 
-Write as Parquet, partitioned by `year`, `month`, `day` (fields coming from the weather dataset):
+Write as Parquet, partitioned by `country`, `city` (fields coming from the weather dataset):
 
 ```python
 (
     enriched_df
     .write
     .mode("overwrite")           # idempotent
-    .partitionBy("year", "month", "day")
+    .partitionBy("country", "city")
     .parquet(OUTPUT_PATH)
 )
 ```
 
-This preserves the logical partitioning of the weather data in the final enriched dataset.
+his writes the final enriched dataset in Parquet format and organizes files by country/city folders, making it easy to query or inspect data per region.
 
 ---
 
