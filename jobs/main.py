@@ -88,7 +88,7 @@ def inspect_df(df: DataFrame, name: str) -> None:
 
 def geocode_with_opencage(city: str, country: str):
 
-    api_key = "0285d06047d84d0ab21b0e2e82078e59"
+    api_key = "0285d06047d84d0ab21b0e2e82078e59" # Replace with your actual API key fromd
 
     url = "https://api.opencagedata.com/geocode/v1/json"
     params = {
@@ -225,7 +225,7 @@ def write_enriched_data(enriched_df: DataFrame) -> None:
         enriched_df
         .write
         .mode("overwrite")
-        .partitionBy("year", "month", "day")
+        .partitionBy("country", "city")
         .parquet(output_path)
     )
 
